@@ -2,38 +2,61 @@
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
+using System.Buffers;
 using System.Net.Sockets;
+using System.Threading;
 
 namespace Microsoft.AspNetCore.Server.Kestrel.Transport.Sockets.Internal
 {
-    public class SocketReceiver
+    public class SocketReceiver : SocketOperation
     {
-        private readonly Socket _socket;
-        private readonly SocketAsyncEventArgs _eventArgs = new SocketAsyncEventArgs();
-        private readonly SocketAwaitable _awaitable = new SocketAwaitable();
+        private static unsafe readonly IOCompletionCallback _completionCallback = new IOCompletionCallback(CompletionCallback);
 
-        public SocketReceiver(Socket socket)
+        private MemoryHandle _memoryHandle;
+
+        internal SocketReceiver(Socket socket, SocketConnection socketConnection, ThreadPoolBoundHandle threadPoolBoundHandle)
+            : base(socket, socketConnection, threadPoolBoundHandle, _completionCallback)
         {
-            _socket = socket;
-            _eventArgs.UserToken = _awaitable;
-            _eventArgs.Completed += (_, e) => ((SocketAwaitable)e.UserToken).Complete(e.BytesTransferred, e.SocketError);
         }
 
-        public SocketAwaitable ReceiveAsync(Memory<byte> buffer)
+        public unsafe SocketAwaitable ReceiveAsync(Memory<byte> buffer)
         {
-#if NETCOREAPP2_1
-            _eventArgs.SetBuffer(buffer);
-#else
-            var segment = buffer.GetArray();
+            _memoryHandle = buffer.Retain(pin: true);
 
-            _eventArgs.SetBuffer(segment.Array, segment.Offset, segment.Count);
-#endif
-            if (!_socket.ReceiveAsync(_eventArgs))
+            var overlapped = GetOverlapped();
+
+            var wsaBuffer = new WSABuffer
             {
-                _awaitable.Complete(_eventArgs.BytesTransferred, _eventArgs.SocketError);
+                Length = buffer.Length,
+                Pointer = (IntPtr)_memoryHandle.Pointer
+            };
+
+            var socketFlags = SocketFlags.None;
+            var errno = WSARecv(
+                _socket.Handle,
+                &wsaBuffer,
+                1,
+                out var bytesTransferred,
+                ref socketFlags,
+                overlapped,
+                IntPtr.Zero);
+
+
+            var awaitable = GetAwaitable(overlapped, errno, bytesTransferred, out var completedInline);
+
+            if (completedInline)
+            {
+                _memoryHandle.Dispose();
             }
 
-            return _awaitable;
+            return awaitable;
+        }
+
+        private static unsafe void CompletionCallback(uint errno, uint bytesTransferred, NativeOverlapped* overlapped)
+        {
+            var socketReceiver = (SocketReceiver)ThreadPoolBoundHandle.GetNativeOverlappedState(overlapped);
+            socketReceiver._memoryHandle.Dispose();
+            socketReceiver.OperationCompletionCallback(errno, bytesTransferred, overlapped);
         }
     }
 }

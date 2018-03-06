@@ -13,6 +13,7 @@ using Microsoft.AspNetCore.Protocols;
 using System.Threading;
 using Microsoft.AspNetCore.Server.Kestrel.Transport.Abstractions.Internal;
 using Microsoft.Extensions.Logging;
+using System.Runtime.InteropServices;
 
 namespace Microsoft.AspNetCore.Server.Kestrel.Transport.Sockets.Internal
 {
@@ -22,6 +23,9 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Transport.Sockets.Internal
 
         private readonly Socket _socket;
         private readonly ISocketsTrace _trace;
+
+        private readonly ThreadPoolBoundHandle _threadPoolBoundHandle;
+
         private readonly SocketReceiver _receiver;
         private readonly SocketSender _sender;
 
@@ -46,13 +50,16 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Transport.Sockets.Internal
             RemoteAddress = remoteEndPoint.Address;
             RemotePort = remoteEndPoint.Port;
 
-            _receiver = new SocketReceiver(_socket);
-            _sender = new SocketSender(_socket);
+            _threadPoolBoundHandle = ThreadPoolBoundHandle.BindHandle(new UnownedSocketHandle(socket));
+            _receiver = new SocketReceiver(_socket, this, _threadPoolBoundHandle);
+            _sender = new SocketSender(_socket, this, _threadPoolBoundHandle);
         }
 
         public override MemoryPool<byte> MemoryPool { get; }
         public override PipeScheduler InputWriterScheduler => PipeScheduler.Inline;
         public override PipeScheduler OutputReaderScheduler => PipeScheduler.ThreadPool;
+
+        public bool Aborted => _aborted;
 
         public async Task StartAsync(IConnectionHandler connectionHandler)
         {
@@ -241,6 +248,21 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Transport.Sockets.Internal
             }
 
             return error;
+        }
+
+        private class UnownedSocketHandle : SafeHandle
+        {
+            public UnownedSocketHandle(Socket socket)
+                : base(socket.Handle, ownsHandle: false)
+            {
+            }
+
+            public override bool IsInvalid => handle == IntPtr.Zero;
+
+            protected override bool ReleaseHandle()
+            {
+                return true;
+            }
         }
     }
 }

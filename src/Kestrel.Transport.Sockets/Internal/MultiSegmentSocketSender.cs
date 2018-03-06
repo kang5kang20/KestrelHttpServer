@@ -9,49 +9,40 @@ using System.Threading;
 
 namespace Microsoft.AspNetCore.Server.Kestrel.Transport.Sockets.Internal
 {
-    public class SocketSender : SocketOperation
+    public class MultiSegmentSocketSender : SocketOperation
     {
         private static unsafe readonly IOCompletionCallback _completionCallback = new IOCompletionCallback(CompletionCallback);
 
-        private SocketConnection _socketConnection;
-        private ThreadPoolBoundHandle _threadPoolBoundHandle;
+        private readonly List<MemoryHandle> _memoryHandleList = new List<MemoryHandle>();
 
-        private MemoryHandle _memoryHandle;
-        private MultiSegmentSocketSender _multiSegmentSocketSender;
-
-        internal SocketSender(Socket socket, SocketConnection socketConnection, ThreadPoolBoundHandle threadPoolBoundHandle)
+        internal MultiSegmentSocketSender(Socket socket, SocketConnection socketConnection, ThreadPoolBoundHandle threadPoolBoundHandle)
             : base(socket, socketConnection, threadPoolBoundHandle, _completionCallback)
         {
-            _socketConnection = socketConnection;
-            _threadPoolBoundHandle = threadPoolBoundHandle;
         }
 
         public unsafe SocketAwaitable SendAsync(ReadOnlySequence<byte> buffers)
         {
-            if (!buffers.IsSingleSegment)
-            {
-                if (_multiSegmentSocketSender == null)
-                {
-                    _multiSegmentSocketSender = new MultiSegmentSocketSender(_socket, _socketConnection, _threadPoolBoundHandle);
-                }
+            var bufferCount = (int)buffers.Length;
+            var wsaBuffers = stackalloc WSABuffer[bufferCount];
 
-                return _multiSegmentSocketSender.SendAsync(buffers);
+            var i = 0;
+            foreach (var buffer in buffers)
+            {
+                var memoryHandle = buffer.Retain(pin: true);
+                _memoryHandleList.Add(memoryHandle);
+
+                wsaBuffers[i].Length = buffer.Length;
+                wsaBuffers[i].Pointer = (IntPtr)memoryHandle.Pointer;
+
+                i++;
             }
 
             var overlapped = GetOverlapped();
 
-            _memoryHandle = buffers.First.Retain(pin: true);
-            
-            var wsaBuffer = new WSABuffer
-            {
-                Length = buffers.First.Length,
-                Pointer = (IntPtr)_memoryHandle.Pointer
-            };
-
             var errno = WSASend(
                 _socket.Handle,
-                &wsaBuffer,
-                1,
+                wsaBuffers,
+                bufferCount,
                 out var bytesTransferred,
                 SocketFlags.None,
                 overlapped,
@@ -61,16 +52,26 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Transport.Sockets.Internal
 
             if (completedInline)
             {
-                _memoryHandle.Dispose();
+                DisposeHandles();
             }
 
             return awaitable;
         }
 
+        private void DisposeHandles()
+        {
+            foreach (var handle in _memoryHandleList)
+            {
+                handle.Dispose();
+            }
+
+            _memoryHandleList.Clear();
+        }
+
         private static unsafe void CompletionCallback(uint errno, uint bytesTransferred, NativeOverlapped* overlapped)
         {
-            var socketSender = (SocketSender)ThreadPoolBoundHandle.GetNativeOverlappedState(overlapped);
-            socketSender._memoryHandle.Dispose();
+            var socketSender = (MultiSegmentSocketSender)ThreadPoolBoundHandle.GetNativeOverlappedState(overlapped);
+            socketSender.DisposeHandles();
             socketSender.OperationCompletionCallback(errno, bytesTransferred, overlapped);
         }
     }
