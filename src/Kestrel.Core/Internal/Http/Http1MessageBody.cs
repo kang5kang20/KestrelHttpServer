@@ -93,12 +93,13 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http
                             BadHttpRequestException.Throw(RequestRejectionReason.UnexpectedEndOfRequestContent);
                         }
 
-                        awaitable = _context.Input.ReadAsync();
                     }
                     finally
                     {
                         _context.Input.AdvanceTo(consumed, examined);
                     }
+
+                    awaitable = _context.Input.ReadAsync();
                 }
             }
             catch (Exception ex)

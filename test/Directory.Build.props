@@ -6,6 +6,7 @@
     <StandardTestTfms>$(DeveloperBuildTestTfms)</StandardTestTfms>
     <StandardTestTfms Condition=" '$(DeveloperBuild)' != 'true' ">netcoreapp2.1;netcoreapp2.0</StandardTestTfms>
     <StandardTestTfms Condition=" '$(DeveloperBuild)' != 'true' AND '$(OS)' == 'Windows_NT' ">$(StandardTestTfms);net461</StandardTestTfms>
+    <StandardTestTfms>netcoreapp2.1</StandardTestTfms>
   </PropertyGroup>
 
   <PropertyGroup>
