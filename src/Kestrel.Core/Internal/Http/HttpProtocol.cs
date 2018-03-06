@@ -383,7 +383,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http
         {
         }
 
-        protected virtual bool BeginRead(out PipeAwaiter<ReadResult> awaitable)
+        protected virtual bool BeginRead(out ValueTask<ReadResult> awaitable)
         {
             awaitable = default;
             return false;

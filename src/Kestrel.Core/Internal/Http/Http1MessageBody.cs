@@ -320,7 +320,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http
                 var actual = (int)Math.Min(readableBuffer.Length, _inputLength);
                 _inputLength -= actual;
 
-                consumed = readableBuffer.GetPosition(readableBuffer.Start, actual);
+                consumed = readableBuffer.GetPosition(actual);
                 examined = consumed;
 
                 Copy(readableBuffer.Slice(0, actual), writableBuffer);
@@ -561,7 +561,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http
             private void ReadChunkedData(ReadOnlySequence<byte> buffer, PipeWriter writableBuffer, out SequencePosition consumed, out SequencePosition examined)
             {
                 var actual = Math.Min(buffer.Length, _inputLength);
-                consumed = buffer.GetPosition(buffer.Start, actual);
+                consumed = buffer.GetPosition(actual, buffer.Start);
                 examined = consumed;
 
                 Copy(buffer.Slice(0, actual), writableBuffer);

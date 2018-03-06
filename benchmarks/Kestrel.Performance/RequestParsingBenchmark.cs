@@ -147,7 +147,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Performance
                 return;
             }
 
-            var readableBuffer = awaitable.GetResult().Buffer;
+            var readableBuffer = awaitable.GetAwaiter().GetResult().Buffer;
             do
             {
                 Http1Connection.Reset();
